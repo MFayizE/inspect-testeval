@@ -1,0 +1,21 @@
+title: "TestEval: Benchmarking Large Language Models for Test Case Generation"
+description: |
+  Measures how well language models write unit tests for 210 LeetCode Python programs: overall line and branch coverage, and covering a given target line, branch or execution path. Generated tests run in a Docker sandbox and are scored with coverage.py.
+arxiv: https://arxiv.org/abs/2406.04531
+group: Coding
+contributors:
+  - MFayizE
+version: "1-A"
+tasks:
+  - name: inspect_testeval
+    dataset_samples: 2
+metadata:
+  sandbox:
+    - scorer
+
+external_assets:
+  - type: direct_url
+    source: "https://raw.githubusercontent.com/LLM4SoftwareTesting/TestEval/6f67dee71de6ccda1767b8c219a93f4ae0a7ce90/data/leetcode-py-all.jsonl"
+    fetch_method: other
+    state: pinned
+    comment: Fetched via fsspec (load_json_dataset)

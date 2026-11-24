@@ -1,0 +1,16 @@
+# This file is auto-generated and updated by Copier; do not edit by hand.
+# Run `copier update` to pull in template changes.
+_commit: v2.0.0
+_src_path: E:/Projects/Works/Open Source/.research/inspect-evals-template
+author_email: mohdfayize@gmail.com
+author_name: Mohamed Fayis Elayodath
+eval_description: 'TestEval (NAACL 2025): benchmarking LLMs on test case generation
+    with overall, targeted line, branch and path coverage'
+eval_name: inspect-testeval
+github_owner: MFayizE
+github_username: MFayizE
+include_examples: false
+layout: single-eval
+license: MIT
+python_version: '3.12'
+use_template_update: true

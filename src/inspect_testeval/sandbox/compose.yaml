@@ -1,0 +1,10 @@
+services:
+  default:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Model-generated tests never need the network.
+    network_mode: none
+    mem_limit: 1g
+    cpus: 1
+    init: true

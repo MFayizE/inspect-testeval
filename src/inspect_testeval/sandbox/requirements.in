@@ -1,0 +1,8 @@
+# Top-level sandbox dependencies. Regenerate requirements.txt with:
+#   uv pip compile src/inspect_testeval/sandbox/requirements.in --generate-hashes \
+#     --python-version 3.12 --python-platform x86_64-unknown-linux-gnu \
+#     -o src/inspect_testeval/sandbox/requirements.txt
+pytest==9.2.0
+pytest-cov==7.1.0
+coverage==7.17.3
+sortedcontainers==2.4.0
