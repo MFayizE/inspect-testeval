@@ -36,7 +36,7 @@ dev = [
     "pytest-dotenv",
     "pytest-inspect-evals[huggingface]==0.4.0",
     "pytest-mock",
-    "ruff==0.17.4",
+    "ruff==0.17.5",
     # Same pins as src/inspect_testeval/sandbox/requirements.in, so the coverage
     # runner's unit tests run locally exactly as in the sandbox.
     "coverage==7.17.3",
