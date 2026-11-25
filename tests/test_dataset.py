@@ -13,9 +13,10 @@ from inspect_testeval.dataset import (
     load_testeval_dataset,
     record_to_branch_samples,
     record_to_line_samples,
+    record_to_path_samples,
     record_to_sample,
 )
-from inspect_testeval.prompts import branch_prompt, line_prompt
+from inspect_testeval.prompts import branch_prompt, line_prompt, path_prompt
 
 
 def make_record(**overrides: Any) -> dict[str, Any]:
@@ -190,7 +191,7 @@ def test_branch_samples_reject_invalid_blocks(block: dict[str, Any]) -> None:
 
 def test_target_dataset_rejects_unknown_target() -> None:
     with pytest.raises(ValueError, match="target must be"):
-        load_target_dataset("path")  # type: ignore[arg-type]  # invalid on purpose
+        load_target_dataset("statement")  # type: ignore[arg-type]  # invalid on purpose
 
 
 @pytest.mark.dataset_download
@@ -211,3 +212,45 @@ def test_target_datasets_shuffle_targets_across_programs() -> None:
     assert shuffled == [str(s.id) for s in load_target_dataset("line")]
     assert shuffled != upstream
     assert sorted(shuffled) == sorted(upstream)
+
+
+def test_path_samples_use_instrumented_description() -> None:
+    record = make_record(
+        sampled_paths=[["BRANCH #1\n"], []],
+        sampled_condition_paths=[["Line 2: (x)"], []],
+    )
+    samples = record_to_path_samples(record, descriptions={1: "Up to 10^9."})
+    assert [s.id for s in samples] == ["1_path_0", "1_path_1"]
+    assert samples[0].input == path_prompt(
+        record["python_solution"], "Up to 10^9.", "twoSum", ["Line 2: (x)"]
+    )
+    metadata = samples[0].metadata
+    assert metadata is not None
+    assert metadata["description"] == "Up to 10^9."
+    assert metadata["target_path"] == ["BRANCH #1\n"]
+    assert metadata["condition_path"] == ["Line 2: (x)"]
+    assert metadata["python_solution_instrumented"] == record["python_solution_instrumented"]
+    assert metadata["task_title"] == "Two Sum"
+    # An empty target path (no branch entered) is a valid target.
+    assert samples[1].metadata is not None
+    assert samples[1].metadata["target_path"] == []
+
+
+def test_path_samples_reject_mismatched_condition_paths() -> None:
+    record = make_record(sampled_condition_paths=[])
+    with pytest.raises(ValueError, match="condition paths"):
+        record_to_path_samples(record, descriptions={1: "d"})
+
+
+@pytest.mark.dataset_download
+def test_path_dataset_matches_published_counts() -> None:
+    samples = list(load_target_dataset("path", shuffle=False))
+    assert len(samples) == len({s.id for s in samples}) == 854
+    assert sum(not s.metadata["target_path"] for s in samples if s.metadata) == 8
+    instrumented = {
+        r["task_num"]: r for r in _read_upstream_jsonl("leetcode-py-instrumented.jsonl")
+    }
+    for sample in samples:
+        assert sample.metadata is not None
+        task = instrumented[sample.metadata["task_num"]]
+        assert sample.metadata["description"] == task["description"]

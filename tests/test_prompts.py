@@ -12,11 +12,13 @@ from inspect_testeval.prompts import (
     LINE_TEMPLATE,
     OVERALL_FOLLOW_UP,
     OVERALL_TEMPLATE,
+    PATH_TEMPLATE,
     SYSTEM_TEMPLATE,
     add_lineno,
     branch_prompt,
     line_prompt,
     overall_prompt,
+    path_prompt,
     system_message,
 )
 
@@ -154,4 +156,47 @@ def test_every_target_prompt_matches_the_reference_generator() -> None:
         ours += [s.input for s in branches if str(s.id).startswith(prefix)]
     expected = _upstream_target_prompts(rows)
     assert len(expected) == 1340 + 983
+    assert ours == expected
+
+
+@pytest.mark.dataset_download
+def test_path_template_matches_upstream_file() -> None:
+    assert _upstream("prompt/template_path.txt") == PATH_TEMPLATE
+
+
+def test_path_prompt_quotes_and_chains_conditions() -> None:
+    prompt = path_prompt(PROGRAM, "Do f.", "f", ["Line 3: (x)", "Line 5: "])
+    assert "Target execution path: 'Line 3: (x)' -> 'Line 5: '\n----\n" in prompt
+    assert "must cover the following execution path in function f." in prompt
+    assert prompt.endswith("def test_f():\n    solution=Solution()\n")
+
+
+@pytest.mark.dataset_download
+def test_every_path_prompt_matches_the_reference_generator() -> None:
+    # generate_pathcov_openai.py reads programs and descriptions from
+    # leetcode-py-instrumented.jsonl and paths from tgt_paths.jsonl.
+    template = _upstream("prompt/template_path.txt")
+    programs = [
+        json.loads(line)
+        for line in _upstream("data/leetcode-py-instrumented.jsonl").splitlines()
+        if line
+    ]
+    paths = [json.loads(line) for line in _upstream("data/tgt_paths.jsonl").splitlines() if line]
+    expected = []
+    for data, path_data in zip(programs, paths, strict=True):
+        code_withlineno = "".join(
+            f"{i + 1}. {line}\n" for i, line in enumerate(data["python_solution"].split("\n"))
+        )
+        for condition_path in path_data["sampled_condition_paths"]:
+            path = " -> ".join(f"'{condition}'" for condition in condition_path)
+            expected.append(
+                template.format(
+                    func_name=data["func_name"],
+                    description=data["description"],
+                    program=code_withlineno,
+                    path=path,
+                )
+            )
+    ours = [s.input for s in load_target_dataset("path", shuffle=False)]
+    assert len(expected) == 854
     assert ours == expected

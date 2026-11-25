@@ -3,22 +3,32 @@
 The data comes from LLM4SoftwareTesting/TestEval (MIT licence), pinned to a
 commit so results stay reproducible. `leetcode-py-all.jsonl` combines the three
 files the original evaluation scripts read (`leetcode-py.jsonl`,
-`leetcode-py-instrumented.jsonl` and `tgt_paths.jsonl`); its fields are
-identical to theirs for every program.
+`leetcode-py-instrumented.jsonl` and `tgt_paths.jsonl`): its fields equal
+those of `leetcode-py.jsonl`, plus the instrumented program and the target
+paths from the other two. `leetcode-py-instrumented.jsonl` has different
+descriptions for 14 programs (it keeps exponents such as `10^9`), so the path
+task reads its descriptions from that file, as the original path generator
+does.
 """
 
+from functools import partial
 from typing import Any, Literal
 
 from inspect_ai.dataset import Dataset, RecordToSample, Sample
 from inspect_evals_utils.datasets import load_json_dataset
 from inspect_evals_utils.shuffle import shuffle_and_seed
 
-from inspect_testeval.prompts import branch_prompt, line_prompt
+from inspect_testeval.prompts import branch_prompt, line_prompt, path_prompt
 
 DATASET_COMMIT = "6f67dee71de6ccda1767b8c219a93f4ae0a7ce90"
 DATASET_URL = (
     "https://raw.githubusercontent.com/LLM4SoftwareTesting/TestEval/"
     f"{DATASET_COMMIT}/data/leetcode-py-all.jsonl"
+)
+# Only the path task reads this file, for its program descriptions.
+INSTRUMENTED_URL = (
+    "https://raw.githubusercontent.com/LLM4SoftwareTesting/TestEval/"
+    f"{DATASET_COMMIT}/data/leetcode-py-instrumented.jsonl"
 )
 EVAL_NAME = "inspect_testeval"
 
@@ -159,6 +169,58 @@ def record_to_branch_samples(record: dict[str, Any]) -> list[Sample]:
     return samples
 
 
+def record_to_path_samples(record: dict[str, Any], descriptions: dict[int, str]) -> list[Sample]:
+    """One sample per target execution path of a program, with the targeted-path prompt as input.
+
+    ``descriptions`` maps each program to its description in
+    leetcode-py-instrumented.jsonl, which generate_pathcov_*.py reads: for 14
+    programs it keeps exponents such as ``10^9`` that the other file has lost
+    (``109``).
+    """
+    _validate(record)
+    paths, conditions = record["sampled_paths"], record["sampled_condition_paths"]
+    if len(paths) != len(conditions):
+        raise ValueError(
+            f"TestEval record {record['task_num']!r} has {len(paths)} paths but "
+            f"{len(conditions)} condition paths"
+        )
+    description = descriptions[record["task_num"]]
+    samples = []
+    for index, (path, condition_path) in enumerate(zip(paths, conditions, strict=True)):
+        samples.append(
+            Sample(
+                id=f"{record['task_num']}_path_{index}",
+                input=path_prompt(
+                    record["python_solution"], description, record["func_name"], condition_path
+                ),
+                metadata=_program_metadata(record)
+                | {
+                    "description": description,
+                    "task_title": record["task_title"],
+                    "python_solution_instrumented": record["python_solution_instrumented"],
+                    "path_index": index,
+                    "target_path": path,
+                    "condition_path": condition_path,
+                },
+            )
+        )
+    return samples
+
+
+def _instrumented_descriptions() -> dict[int, str]:
+    dataset = load_json_dataset(
+        INSTRUMENTED_URL,
+        EVAL_NAME,
+        sample_fields=lambda record: Sample(id=record["task_num"], input=record["description"]),
+    )
+    descriptions: dict[int, str] = {}
+    for sample in dataset:
+        if not isinstance(sample.id, int) or not isinstance(sample.input, str):
+            raise ValueError(f"unexpected record in {INSTRUMENTED_URL}: {sample.id!r}")
+        descriptions[sample.id] = sample.input
+    return descriptions
+
+
 def _load(sample_fields: RecordToSample, shuffle: bool | int) -> Dataset:
     should_shuffle, seed = shuffle_and_seed(shuffle)
     return load_json_dataset(
@@ -181,12 +243,12 @@ def load_testeval_dataset(shuffle: bool | int = DEFAULT_SHUFFLE_SEED) -> Dataset
 
 
 def load_target_dataset(
-    target: Literal["line", "branch"], shuffle: bool | int = DEFAULT_SHUFFLE_SEED
+    target: Literal["line", "branch", "path"], shuffle: bool | int = DEFAULT_SHUFFLE_SEED
 ) -> Dataset:
-    """Load one sample per target line (1,340) or target branch (983).
+    """Load one sample per target line (1,340), branch (983) or execution path (854).
 
     Args:
-        target: ``"line"`` or ``"branch"``.
+        target: ``"line"``, ``"branch"`` or ``"path"``.
         shuffle: A seed, ``True`` for an unseeded shuffle, or ``False`` to keep
             the upstream order (programs by LeetCode number, targets in file order).
     """
@@ -194,4 +256,7 @@ def load_target_dataset(
         return _load(record_to_line_samples, shuffle)
     if target == "branch":
         return _load(record_to_branch_samples, shuffle)
-    raise ValueError(f"target must be 'line' or 'branch', got {target!r}")
+    if target == "path":
+        descriptions = _instrumented_descriptions()
+        return _load(partial(record_to_path_samples, descriptions=descriptions), shuffle)
+    raise ValueError(f"target must be 'line', 'branch' or 'path', got {target!r}")

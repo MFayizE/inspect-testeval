@@ -5,7 +5,7 @@ from inspect_ai import Task, eval
 from inspect_ai.model import ModelOutput, get_model
 from pytest_inspect_evals.assertions import assert_eval_success
 
-from inspect_testeval import testeval_branch, testeval_line, testeval_overall
+from inspect_testeval import testeval_branch, testeval_line, testeval_overall, testeval_path
 from inspect_testeval.environment import SANDBOX_COMPOSE_FILE
 from inspect_testeval.inspect_testeval import EVAL_VERSION
 from inspect_testeval.scorers import coverage_keys
@@ -154,4 +154,31 @@ def test_branch_end_to_end_separates_reference_definition() -> None:
         "covered": 0.0,
         "exec_correct_reference": 1.0,
         "covered_reference": 1.0,
+    }
+
+
+@pytest.mark.dataset_download
+def test_path_task_defaults_follow_the_paper() -> None:
+    task = testeval_path()
+    assert len(task.dataset) == 854
+    assert task.config.temperature == 0.0
+    assert task.config.max_tokens == 256
+
+
+@pytest.mark.dataset_download
+@pytest.mark.docker
+@pytest.mark.slow(300)
+def test_path_end_to_end_follows_the_target() -> None:
+    # The first path in upstream order is path 0 of LeetCode 4: two loop
+    # iterations ending in the odd-length branch. GOOD_TEST takes it, after
+    # first swapping the arrays (an extra leading entry, still a full match).
+    value = _single_reply_eval(testeval_path(shuffle=False), GOOD_TEST)
+    assert value == {
+        "id": "4_path_0",
+        "syntax_correct": 1.0,
+        "exec_correct": 1.0,
+        "path_exact_match": 1.0,
+        "path_similarity": 1.0,
+        "path_exact_match_reference": 1.0,
+        "path_similarity_reference": 1.0,
     }

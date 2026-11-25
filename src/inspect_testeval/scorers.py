@@ -206,19 +206,38 @@ EXECUTED_OUTCOMES = ("ok", "assertion_error")
 async def _run_target_job(
     state: TaskState, check_line: int, measure_errors: bool
 ) -> dict[str, Any]:
+    return await _run_single_test_job(
+        state,
+        {
+            "code": state.metadata["python_solution"],
+            "check_line": check_line,
+            "measure_errors": measure_errors,
+            "coveragerc": COVERAGERC,
+        },
+    )
+
+
+async def _run_path_job(state: TaskState) -> dict[str, Any]:
+    metadata = state.metadata
+    return await _run_single_test_job(
+        state,
+        {
+            # The instrumented program logs each branch it enters to this file.
+            "code": metadata["python_solution_instrumented"],
+            "log_file": f"test_logs/{metadata['task_title']}.log",
+            "target_path": metadata["target_path"],
+        },
+    )
+
+
+async def _run_single_test_job(state: TaskState, fields: dict[str, Any]) -> dict[str, Any]:
+    """Format the sample's one generated test and run it in the sandbox with ``fields``."""
     func_name = state.metadata["func_name"]
     raw_tests = state.store_as(GeneratedTests).raw_tests
     if len(raw_tests) != 1:
         raise RuntimeError(f"expected one generated test, found {len(raw_tests)}")
     formatted = format_test(raw_tests[0], func_name)
-    job = {
-        "code": state.metadata["python_solution"],
-        "func_name": func_name,
-        "test": formatted,
-        "check_line": check_line,
-        "measure_errors": measure_errors,
-        "coveragerc": COVERAGERC,
-    }
+    job = {"func_name": func_name, "test": formatted, **fields}
     job_dir = f"/home/agent/testeval/{state.uuid}"
     env = sandbox()
     await env.write_file(f"{job_dir}/coverage_runner.py", runner_source())
@@ -337,6 +356,69 @@ def target_branch_coverage() -> Scorer:
             },
             explanation=_target_explanation(result, f"branch {start}-{end}", covered),
             metadata=_target_metadata(result),
+        )
+
+    return score
+
+
+def target_path_metrics() -> list[Metric | dict[str, list[Metric]]]:
+    keys = (
+        "syntax_correct",
+        "exec_correct",
+        "path_exact_match",
+        "path_similarity",
+        "path_exact_match_reference",
+        "path_similarity_reference",
+    )
+    return [{key: [mean()] for key in keys}]
+
+
+@scorer(metrics=target_path_metrics())
+def target_path_coverage() -> Scorer:
+    """How closely the generated test follows the target execution path, as eval_pathcov.py scores it.
+
+    The instrumented program logs every branch and loop it enters. For a test
+    that compiles, runs (a failing assertion counts) and calls the function
+    under test, ``path_similarity`` is the longest unbroken run of the target
+    path found in the log, as a share of the target path's length, and
+    ``path_exact_match`` is 1 when the whole target path appears unbroken in
+    the log. Any other test scores 0 on both.
+
+    For the 8 empty target paths the test must enter no branch or loop: it
+    scores 1 on both if its log is empty. The ``_reference`` keys reproduce
+    eval_pathcov.py exactly, which scores every test 0 on an empty target path
+    (its ``match_path`` divides by zero and a bare ``except`` swallows it).
+    """
+
+    async def score(state: TaskState, target: Target) -> Score:
+        result = await _run_path_job(state)
+        executed = result["called"] and result["outcome"] in EXECUTED_OUTCOMES
+        similarity = float(result["similarity"]) if executed else 0.0
+        similarity_reference = float(result["similarity_reference"]) if executed else 0.0
+        if not result["syntax_ok"]:
+            explanation = "the test does not compile"
+        else:
+            detail = result["outcome"] + (f" ({result['error']})" if "error" in result else "")
+            if not result["called"]:
+                detail += ", function under test not called"
+            explanation = f"test outcome: {detail}"
+            if executed:
+                explanation += (
+                    f"; path similarity {similarity:.3f} over {result['path_length']} "
+                    f"logged branch entries"
+                )
+        keys = ("formatted_test", "outcome", "error", "called", "path_length", "path_preview")
+        return Score(
+            value={
+                "syntax_correct": float(result["syntax_ok"]),
+                "exec_correct": float(executed),
+                "path_exact_match": float(executed and similarity == 1.0),
+                "path_similarity": similarity,
+                "path_exact_match_reference": float(executed and similarity_reference == 1.0),
+                "path_similarity_reference": similarity_reference,
+            },
+            explanation=explanation,
+            metadata={key: result[key] for key in keys if key in result},
         )
 
     return score

@@ -32,6 +32,31 @@ OVERALL_TEMPLATE = (
     "    solution=Solution()\n"
 )
 
+# prompt/template_path.txt: cover one target execution path.
+PATH_TEMPLATE = (
+    "Please write a test method for the function '{func_name}' given the following program "
+    "under test and function description. Your answer should only contain one test input.\n"
+    "\n"
+    "Program under test:\n"
+    "----\n"
+    "{program}\n"
+    "----\n"
+    "\n"
+    "Function description for '{func_name}':\n"
+    "----\n"
+    "{description}\n"
+    "----\n"
+    "\n"
+    "Your test case must cover the following execution path in function {func_name}. The path "
+    "is a sequence of branch conditions. When executing your test case, each branch condition "
+    "in the target execution path must be satisfied sequentially.\n"
+    "Target execution path: {path}\n"
+    "----\n"
+    "Your test method should begin with:\n"
+    "def test_{func_name}():\n"
+    "    solution=Solution()\n"
+)
+
 # generate_cov_{openai,hf,gemini}.py: the user turn added before each further test.
 OVERALL_FOLLOW_UP = (
     "Generate another test method for the function under test. Your answer must be different "
@@ -120,4 +145,16 @@ def branch_prompt(program: str, description: str, func_name: str, start: int, en
     branch = "\n'''\n" + "\n".join(lines) + "\n'''"
     return BRANCH_TEMPLATE.format(
         program=numbered, description=description, func_name=func_name, branch=branch
+    )
+
+
+def path_prompt(program: str, description: str, func_name: str, conditions: list[str]) -> str:
+    """The targeted-path prompt, built as generate_pathcov_openai.py builds it.
+
+    The path is its branch conditions, each in single quotes, joined by
+    ``" -> "`` (prompt_utils.generate_path).
+    """
+    path = " -> ".join(f"'{condition}'" for condition in conditions)
+    return PATH_TEMPLATE.format(
+        program=add_lineno(program), description=description, func_name=func_name, path=path
     )

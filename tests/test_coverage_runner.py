@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from inspect_testeval import coverage_runner
-from inspect_testeval.coverage_runner import cov_at_k, evaluate, evaluate_target, split_groups
+from inspect_testeval.coverage_runner import (
+    cov_at_k,
+    evaluate,
+    evaluate_path,
+    evaluate_target,
+    split_groups,
+)
 from inspect_testeval.scorers import COVERAGERC
 
 # 7 statements (class, def, if, return, if, return, return) and 4 branches.
@@ -267,3 +273,88 @@ def test_main_dispatches_on_job_kind(tmp_path: Path, capsys: pytest.CaptureFixtu
     overall.write_text(json.dumps(_job([POSITIVE])), encoding="utf-8")
     assert coverage_runner.main(["runner", str(overall)]) == 0
     assert json.loads(capsys.readouterr().out)["exec_correct"] == 1
+
+
+@pytest.mark.parametrize(
+    ("generated", "reference", "similarity"),
+    [
+        (["a", "b", "c"], ["a", "b", "c"], 1.0),
+        # The reference appears unbroken inside a longer log: still 1.
+        (["x", "a", "b", "y"], ["a", "b"], 1.0),
+        # Longest common *contiguous* run, not subsequence: "a", "c" share only runs of 1.
+        (["a", "b", "c"], ["a", "c"], 0.5),
+        (["b", "a"], ["a", "b"], 0.5),
+        ([], ["a"], 0.0),
+    ],
+)
+def test_match_path_is_longest_common_contiguous_run(
+    generated: list[str], reference: list[str], similarity: float
+) -> None:
+    assert coverage_runner.match_path(generated, reference) == pytest.approx(similarity)
+
+
+# Logs each branch it enters, as the instrumented TestEval programs do.
+INSTRUMENTED = """\
+class Solution:
+    def classify(self, x: int) -> str:
+        if x > 0:
+            log_function('BRANCH #1\\n')
+            return "pos"
+        return "other"
+
+def log_function(info_str):
+    with open("test_logs/Classify.log", "a") as file:
+        file.write(info_str)
+"""
+
+
+def _path_job(test: str, target_path: list[str]) -> dict[str, object]:
+    return {
+        "code": INSTRUMENTED,
+        "func_name": "classify",
+        "test": test,
+        "log_file": "test_logs/Classify.log",
+        "target_path": target_path,
+    }
+
+
+def test_path_reads_the_branches_the_test_entered(tmp_path: Path) -> None:
+    result = evaluate_path(_path_job(POSITIVE, ["BRANCH #1\n"]), tmp_path / "work")
+    assert result["outcome"] == "ok"
+    assert result["path_preview"] == ["BRANCH #1\n"]
+    assert result["similarity"] == result["similarity_reference"] == 1.0
+
+
+def test_path_log_is_emptied_before_each_test(tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    evaluate_path(_path_job(POSITIVE, ["BRANCH #1\n"]), work)
+    result = evaluate_path(_path_job(NEGATIVE, ["BRANCH #1\n"]), work)
+    assert result["path_length"] == 0
+    assert result["similarity"] == 0.0
+
+
+def test_empty_target_path_scores_both_definitions(tmp_path: Path) -> None:
+    # No branch entered: the port counts it as following the empty path;
+    # the reference scorer divides by zero and scores 0.
+    followed = evaluate_path(_path_job(NEGATIVE, []), tmp_path / "a")
+    assert (followed["similarity"], followed["similarity_reference"]) == (1.0, 0.0)
+    strayed = evaluate_path(_path_job(POSITIVE, []), tmp_path / "b")
+    assert (strayed["similarity"], strayed["similarity_reference"]) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("test", "outcome"),
+    [(SYNTAX_ERROR, "syntax_error"), (RUNTIME_ERROR, "error"), (NOT_CALLED, "ok")],
+)
+def test_path_not_scored_without_an_executed_call(tmp_path: Path, test: str, outcome: str) -> None:
+    result = evaluate_path(_path_job(test, ["BRANCH #1\n"]), tmp_path / "work")
+    assert result["outcome"] == outcome
+    assert result["similarity"] is None
+
+
+def test_main_runs_path_jobs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    job = tmp_path / "path" / "job.json"
+    job.parent.mkdir()
+    job.write_text(json.dumps(_path_job(POSITIVE, ["BRANCH #1\n"])), encoding="utf-8")
+    assert coverage_runner.main(["runner", str(job)]) == 0
+    assert json.loads(capsys.readouterr().out)["similarity"] == 1.0

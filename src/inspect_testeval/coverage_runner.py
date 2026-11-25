@@ -17,8 +17,12 @@ from https://github.com/LLM4SoftwareTesting/TestEval (MIT licence, commit
 ``evaluate_target`` scores one test written to cover a target line or branch,
 following ``eval_linecov.py`` and ``eval_branchcov.py`` from the same commit.
 
+``evaluate_path`` scores one test written to follow a target execution path,
+following ``eval_pathcov.py``.
+
 Usage: ``python coverage_runner.py <job.json>``; prints one JSON object. A job
-with ``check_line`` is a targeted job, any other an overall one.
+with ``target_path`` is a path job, one with ``check_line`` a targeted line or
+branch job, any other an overall one.
 """
 
 import json
@@ -340,11 +344,102 @@ def evaluate_target(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
     return result
 
 
+def match_path(generated_path: list[str], ref_path: list[str]) -> float:
+    """Path similarity exactly as eval_pathcov.py's ``match_path`` computes it.
+
+    Its docstring says longest common subsequence, but the dynamic programme
+    never carries a match forward past a mismatch, so it is the longest common
+    *contiguous* run of entries, divided by the length of the reference path.
+    A similarity of 1 means the reference path appears unbroken somewhere in
+    the generated one, which may be longer. Like the original, it divides by
+    zero for an empty reference path; ``evaluate_path`` handles that case.
+    """
+    ref_len = len(ref_path)
+    previous = [0] * (ref_len + 1)
+    longest = 0
+    for generated in generated_path:
+        current = [0] * (ref_len + 1)
+        for j in range(1, ref_len + 1):
+            if generated == ref_path[j - 1]:
+                current[j] = previous[j - 1] + 1
+                longest = max(longest, current[j])
+        previous = current
+    return longest / ref_len
+
+
+# Leading entries of the generated path kept in the result, for inspection.
+PATH_PREVIEW_ENTRIES = 50
+
+
+def evaluate_path(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
+    """Run one test written to follow a target path and compare the path it took.
+
+    Follows eval_pathcov.py: the program under test is the instrumented one,
+    which appends a line to ``log_file`` (relative to the working directory)
+    at every branch and loop it enters. The log is emptied before the test;
+    a test that compiles, runs (a failing assertion counts) and calls the
+    function under test is scored by ``match_path`` of its log against
+    ``target_path``.
+
+    8 target paths are empty: the test should enter no branch or loop at all.
+    ``similarity`` is then 1 if the log is empty and 0 otherwise.
+    ``similarity_reference`` is always 0 for them, as in eval_pathcov.py,
+    whose ``match_path`` divides by zero inside a bare ``except`` that records
+    the test as failed after it was already counted as executable.
+    """
+    func_name: str = job["func_name"]
+    testcase: str = job["test"]
+    workdir.mkdir(parents=True, exist_ok=True)
+    (workdir / "under_test.py").write_text(job["code"], encoding="utf-8")
+    log_path = workdir / job["log_file"]
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("", encoding="utf-8")
+
+    result: dict[str, Any] = {
+        "syntax_ok": False,
+        "outcome": "syntax_error",
+        "called": False,
+        "similarity": None,
+        "similarity_reference": None,
+    }
+    try:
+        compile(testcase, "<string>", "exec")
+    except Exception:  # upstream counts any compile failure as a syntax error
+        return result
+    result["syntax_ok"] = True
+
+    test_code = "from under_test import Solution\n" + testcase + f"\ntest_{func_name}()"
+    outcome = run_test(workdir, 0, test_code)
+    result["outcome"] = outcome["status"]
+    if "error" in outcome:
+        result["error"] = outcome["error"]
+    result["called"] = test_code.find(f"solution.{func_name}") != -1
+    if not result["called"] or result["outcome"] not in ("ok", "assertion_error"):
+        return result
+    # readlines() keeps each entry's newline, as the reference paths do.
+    with log_path.open(encoding="utf-8", errors="replace") as fh:
+        generated = fh.readlines()
+    target_path: list[str] = job["target_path"]
+    if target_path:
+        result["similarity"] = result["similarity_reference"] = match_path(generated, target_path)
+    else:
+        result["similarity"] = 0.0 if generated else 1.0
+        result["similarity_reference"] = 0.0
+    result["path_length"] = len(generated)
+    result["path_preview"] = generated[:PATH_PREVIEW_ENTRIES]
+    return result
+
+
 def main(argv: list[str]) -> int:
     job_path = Path(argv[1])
     job = json.loads(job_path.read_text(encoding="utf-8"))
     workdir = job_path.parent / "work"
-    result = evaluate_target(job, workdir) if "check_line" in job else evaluate(job, workdir)
+    if "target_path" in job:
+        result = evaluate_path(job, workdir)
+    elif "check_line" in job:
+        result = evaluate_target(job, workdir)
+    else:
+        result = evaluate(job, workdir)
     sys.stdout.write(json.dumps(result))
     return 0
 

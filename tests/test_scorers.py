@@ -25,6 +25,8 @@ from inspect_testeval.scorers import (
     target_branch_metrics,
     target_line_coverage,
     target_line_metrics,
+    target_path_coverage,
+    target_path_metrics,
 )
 
 
@@ -326,3 +328,62 @@ def _async_returning(result: dict) -> Callable[..., Coroutine[Any, Any, dict]]:
         return result
 
     return fake_job
+
+
+def _path_result(
+    outcome: str, similarity: float | None, reference: float | None, called: bool = True
+) -> dict:
+    return {
+        "syntax_ok": outcome != "syntax_error",
+        "outcome": outcome,
+        "called": called,
+        "similarity": similarity,
+        "similarity_reference": reference,
+        "path_length": 3,
+        "formatted_test": "def test_f(): ...",
+    }
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        # syntax, exec, exact, similarity, exact_reference, similarity_reference
+        (_path_result("ok", 1.0, 1.0), (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)),
+        (_path_result("assertion_error", 0.5, 0.5), (1.0, 1.0, 0.0, 0.5, 0.0, 0.5)),
+        # Empty target path followed: only this eval's definition credits it.
+        (_path_result("ok", 1.0, 0.0), (1.0, 1.0, 1.0, 1.0, 0.0, 0.0)),
+        (_path_result("error", None, None), (1.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+        (_path_result("ok", None, None, called=False), (1.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+        (_path_result("syntax_error", None, None, called=False), (0.0,) + (0.0,) * 5),
+    ],
+)
+def test_target_path_coverage_scores_each_outcome(
+    monkeypatch: pytest.MonkeyPatch, result: dict, expected: tuple[float, ...]
+) -> None:
+    monkeypatch.setattr(scorers, "_run_path_job", _async_returning(result))
+    score = asyncio.run(target_path_coverage()(_state({}), Target("")))
+    assert score is not None
+    assert isinstance(score.value, dict)
+    keys = (
+        "syntax_correct",
+        "exec_correct",
+        "path_exact_match",
+        "path_similarity",
+        "path_exact_match_reference",
+        "path_similarity_reference",
+    )
+    assert tuple(score.value[k] for k in keys) == expected
+
+
+def test_path_metrics_unchanged_by_agreeing_epochs() -> None:
+    value = {
+        "syntax_correct": 1.0,
+        "exec_correct": 1.0,
+        "path_exact_match": 0.0,
+        "path_similarity": 0.5,
+        "path_exact_match_reference": 0.0,
+        "path_similarity_reference": 0.5,
+    }
+    assert_agreeing_epochs_change_nothing(
+        target_path_metrics(), [value, {**value, "path_similarity": 1.0}]
+    )

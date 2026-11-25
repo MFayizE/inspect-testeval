@@ -23,6 +23,7 @@ from inspect_testeval.scorers import (
     overall_metrics,
     target_branch_coverage,
     target_line_coverage,
+    target_path_coverage,
 )
 from inspect_testeval.solvers import DEFAULT_NUM_TESTS, overall_tests, targeted_test
 
@@ -103,6 +104,28 @@ def testeval_branch(shuffle: bool | int = DEFAULT_SHUFFLE_SEED) -> Task:
         dataset=load_target_dataset("branch", shuffle=shuffle),
         solver=targeted_test(),
         scorer=target_branch_coverage(),
+        sandbox=SANDBOX,
+        config=GENERATE_CONFIG,
+        version=EVAL_VERSION,
+    )
+
+
+@task
+def testeval_path(shuffle: bool | int = DEFAULT_SHUFFLE_SEED) -> Task:
+    """Targeted path coverage: one test per target execution path, which it must follow.
+
+    854 samples, one per sampled execution path across the 210 programs. The
+    prompt gives the path as a sequence of branch conditions. Reports syntax
+    and execution correctness, the share of paths followed exactly and the mean
+    path similarity.
+
+    Args:
+        shuffle: Sample order: a seed, ``True`` for an unseeded shuffle, or ``False``.
+    """
+    return Task(
+        dataset=load_target_dataset("path", shuffle=shuffle),
+        solver=targeted_test(),
+        scorer=target_path_coverage(),
         sandbox=SANDBOX,
         config=GENERATE_CONFIG,
         version=EVAL_VERSION,

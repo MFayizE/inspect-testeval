@@ -28,13 +28,16 @@ def main() -> None:
         "eval_overall.py",
         "eval_linecov.py",
         "eval_branchcov.py",
+        "eval_pathcov.py",
         "data_utils.py",
         ".coveragerc",
         "data/leetcode-py.jsonl",
+        "data/leetcode-py-instrumented.jsonl",
+        "data/tgt_paths.jsonl",
     ):
         download(f"{UPSTREAM}/{name}", WORK / "official" / name)
     for model in MODELS:
-        for task in ("totalcov", "linecov", "branchcov"):
+        for task in ("totalcov", "linecov", "branchcov", "pathcov"):
             name = f"{task}_{model}_format.jsonl"
             download(f"{FORK}/predictions/{name}", WORK / "predictions" / name)
 

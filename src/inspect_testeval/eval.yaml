@@ -13,6 +13,8 @@ tasks:
     dataset_samples: 1340
   - name: testeval_branch
     dataset_samples: 983
+  - name: testeval_path
+    dataset_samples: 854
 metadata:
   sandbox:
     - scorer
@@ -23,3 +25,8 @@ external_assets:
     fetch_method: other
     state: pinned
     comment: Fetched via fsspec (load_json_dataset)
+  - type: direct_url
+    source: "https://raw.githubusercontent.com/LLM4SoftwareTesting/TestEval/6f67dee71de6ccda1767b8c219a93f4ae0a7ce90/data/leetcode-py-instrumented.jsonl"
+    fetch_method: other
+    state: pinned
+    comment: Fetched via fsspec (load_json_dataset); program descriptions for the path task
