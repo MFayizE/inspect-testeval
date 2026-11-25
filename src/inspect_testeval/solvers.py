@@ -51,3 +51,24 @@ def overall_tests(num_tests: int = DEFAULT_NUM_TESTS) -> Solver:
         return state
 
     return solve
+
+
+@solver
+def targeted_test() -> Solver:
+    """Ask once for a test that covers the sample's target line or branch.
+
+    As in generate_targetcov_openai.py, each target is a fresh conversation:
+    the system message, then the targeted prompt (the sample input).
+    """
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        state.messages = [
+            ChatMessageSystem(content=system_message()),
+            ChatMessageUser(content=state.input_text),
+        ]
+        state = await generate(state)
+        store = state.store_as(GeneratedTests)
+        store.raw_tests = [state.output.completion]
+        return state
+
+    return solve

@@ -10,7 +10,7 @@ from inspect_ai.model import (
 )
 
 from inspect_testeval.prompts import OVERALL_FOLLOW_UP, overall_prompt, system_message
-from inspect_testeval.solvers import GeneratedTests, overall_tests
+from inspect_testeval.solvers import GeneratedTests, overall_tests, targeted_test
 
 PROGRAM = "class Solution:\n    def add(self, a, b):\n        return a + b\n"
 METADATA = {"python_solution": PROGRAM, "description": "Add two numbers.", "func_name": "add"}
@@ -55,3 +55,22 @@ def test_conversation_matches_reference_multiround_shape() -> None:
 def test_rejects_non_positive_num_tests() -> None:
     with pytest.raises(ValueError, match="at least 1"):
         overall_tests(num_tests=0)
+
+
+def test_targeted_test_asks_once_in_a_fresh_conversation() -> None:
+    prompt = "Your test case must cover line 3."
+    model = get_model(
+        "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", "reply")]
+    )
+    task = Task(
+        dataset=[Sample(id="1_line_3", input=prompt, metadata=METADATA)],
+        solver=targeted_test(),
+    )
+    [log] = eval(task, model=model, display="none")
+    assert log.status == "success", log.error
+    assert log.samples is not None
+    sample = log.samples[0]
+    assert [m.role for m in sample.messages] == ["system", "user", "assistant"]
+    assert sample.messages[0].text == system_message()
+    assert sample.messages[1].text == prompt
+    assert sample.store_as(GeneratedTests).raw_tests == ["reply"]

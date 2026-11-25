@@ -1,9 +1,11 @@
+from collections.abc import Callable
+
 import pytest
-from inspect_ai import eval
+from inspect_ai import Task, eval
 from inspect_ai.model import ModelOutput, get_model
 from pytest_inspect_evals.assertions import assert_eval_success
 
-from inspect_testeval import testeval_overall
+from inspect_testeval import testeval_branch, testeval_line, testeval_overall
 from inspect_testeval.environment import SANDBOX_COMPOSE_FILE
 from inspect_testeval.inspect_testeval import EVAL_VERSION
 from inspect_testeval.scorers import coverage_keys
@@ -91,3 +93,65 @@ def test_end_to_end_with_default_mock_output() -> None:
     assert isinstance(value, dict)
     assert value["exec_correct"] == 0
     assert value["line_coverage"] == 0.0
+
+
+@pytest.mark.dataset_download
+@pytest.mark.parametrize(("task", "samples"), [(testeval_line, 1340), (testeval_branch, 983)])
+def test_targeted_task_defaults_follow_the_paper(task: Callable[[], Task], samples: int) -> None:
+    built = task()
+    assert len(built.dataset) == samples
+    assert built.config.temperature == 0.0
+    assert built.config.max_tokens == 256
+    assert built.sandbox is not None
+    assert built.sandbox.config == str(SANDBOX_COMPOSE_FILE)
+
+
+def _single_reply_eval(task: Task, reply: str) -> dict[str, object]:
+    model = get_model(
+        "mockllm/model", custom_outputs=[ModelOutput.from_content("mockllm/model", reply)]
+    )
+    [log] = eval(tasks=task, model=model, limit=1, display="none")
+    assert_eval_success(log, expected_sample_count=1)
+    assert log.samples is not None
+    scores = log.samples[0].scores
+    assert scores is not None
+    [score] = scores.values()
+    assert isinstance(score.value, dict)
+    return {"id": log.samples[0].id, **score.value}
+
+
+@pytest.mark.dataset_download
+@pytest.mark.docker
+@pytest.mark.slow(300)
+def test_line_end_to_end_covers_the_target() -> None:
+    # The first target in upstream order is line 16 of LeetCode 4, the
+    # recursive call taken when nums1 is the longer array, as in GOOD_TEST.
+    value = _single_reply_eval(testeval_line(shuffle=False), GOOD_TEST)
+    assert value == {
+        "id": "4_line_16",
+        "syntax_correct": 1.0,
+        "exec_correct": 1.0,
+        "covered": 1.0,
+    }
+
+
+@pytest.mark.dataset_download
+@pytest.mark.docker
+@pytest.mark.slow(300)
+def test_branch_end_to_end_separates_reference_definition() -> None:
+    # Enters branch 15-16 of LeetCode 4, then raises ZeroDivisionError: the
+    # reference scorer counts that as executed and covered, the paper does not.
+    raises = (
+        "def test_findMedianSortedArrays():\n"
+        "    solution=Solution()\n"
+        "    assert solution.findMedianSortedArrays([1, 3], [2]) == 1 / 0"
+    )
+    value = _single_reply_eval(testeval_branch(shuffle=False), raises)
+    assert value == {
+        "id": "4_branch_15_16",
+        "syntax_correct": 1.0,
+        "exec_correct": 0.0,
+        "covered": 0.0,
+        "exec_correct_reference": 1.0,
+        "covered_reference": 1.0,
+    }

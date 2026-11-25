@@ -11,6 +11,7 @@ from inspect_ai.scorer import (
     Score,
     Scorer,
     Target,
+    grouped,
     mean,
     metric,
     scorer,
@@ -192,6 +193,150 @@ def overall_coverage(ks: Sequence[int] = DEFAULT_KS, seed: int = DEFAULT_SEED) -
                 "test_results": result["tests"],
                 "coverage_failures": failures,
             },
+        )
+
+    return score
+
+
+# One test, plus one pytest run for its coverage.
+TARGET_RUNNER_TIMEOUT_SECONDS = 300
+EXECUTED_OUTCOMES = ("ok", "assertion_error")
+
+
+async def _run_target_job(
+    state: TaskState, check_line: int, measure_errors: bool
+) -> dict[str, Any]:
+    func_name = state.metadata["func_name"]
+    raw_tests = state.store_as(GeneratedTests).raw_tests
+    if len(raw_tests) != 1:
+        raise RuntimeError(f"expected one generated test, found {len(raw_tests)}")
+    formatted = format_test(raw_tests[0], func_name)
+    job = {
+        "code": state.metadata["python_solution"],
+        "func_name": func_name,
+        "test": formatted,
+        "check_line": check_line,
+        "measure_errors": measure_errors,
+        "coveragerc": COVERAGERC,
+    }
+    job_dir = f"/home/agent/testeval/{state.uuid}"
+    env = sandbox()
+    await env.write_file(f"{job_dir}/coverage_runner.py", runner_source())
+    await env.write_file(f"{job_dir}/job.json", json.dumps(job))
+    run = await env.exec(
+        ["python", f"{job_dir}/coverage_runner.py", f"{job_dir}/job.json"],
+        timeout=TARGET_RUNNER_TIMEOUT_SECONDS,
+    )
+    if not run.success:
+        raise RuntimeError(f"coverage runner failed (exit {run.returncode}): {run.stderr[-2000:]}")
+    try:
+        result: dict[str, Any] = json.loads(run.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"coverage runner printed invalid JSON: {run.stdout[-2000:]}") from e
+    result["formatted_test"] = formatted
+    return result
+
+
+def _target_explanation(result: dict[str, Any], what: str, covered: bool) -> str:
+    if not result["syntax_ok"]:
+        return f"the test does not compile, so {what} is not covered"
+    detail = result["outcome"] + (f" ({result['error']})" if "error" in result else "")
+    if not result["called"]:
+        detail += ", function under test not called"
+    explanation = f"test outcome: {detail}; {what} {'covered' if covered else 'not covered'}"
+    if result["coverage_failure"]:
+        explanation += "; the coverage run produced no report, counted as not covered"
+    return explanation
+
+
+def _target_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    keys = ("formatted_test", "outcome", "error", "called", "line_hit", "coverage_failure")
+    return {key: result[key] for key in keys if key in result}
+
+
+def target_line_metrics() -> list[Metric | dict[str, list[Metric]]]:
+    return [{key: [mean()] for key in ("syntax_correct", "exec_correct", "covered")}]
+
+
+@scorer(metrics=target_line_metrics())
+def target_line_coverage() -> Scorer:
+    """Whether the generated test executes the target line, as eval_linecov.py checks.
+
+    ``exec_correct`` counts a test that compiles, runs (a failing assertion
+    counts) and calls the function under test; ``covered`` additionally needs
+    the target line among the lines coverage records as executed.
+    """
+
+    async def score(state: TaskState, target: Target) -> Score:
+        lineno: int = state.metadata["target_line"]
+        result = await _run_target_job(state, check_line=lineno, measure_errors=False)
+        executed = result["called"] and result["outcome"] in EXECUTED_OUTCOMES
+        covered = executed and result["line_hit"] is True
+        return Score(
+            value={
+                "syntax_correct": float(result["syntax_ok"]),
+                "exec_correct": float(executed),
+                "covered": float(covered),
+            },
+            explanation=_target_explanation(result, f"line {lineno}", covered),
+            metadata=_target_metadata(result),
+        )
+
+    return score
+
+
+def target_branch_metrics() -> list[Metric | dict[str, list[Metric]]]:
+    by_difficulty = grouped(mean(), "branch_difficulty_label", all="samples", all_label="all")
+    by_difficulty_reference = grouped(
+        mean(), "branch_difficulty_label", all="samples", all_label="all"
+    )
+    return [
+        {
+            "syntax_correct": [mean()],
+            "exec_correct": [mean()],
+            "covered": [by_difficulty],
+            "exec_correct_reference": [mean()],
+            "covered_reference": [by_difficulty_reference],
+        }
+    ]
+
+
+@scorer(metrics=target_branch_metrics())
+def target_branch_coverage() -> Scorer:
+    """Whether the generated test enters the target branch, as eval_branchcov.py checks.
+
+    A branch counts as covered when the line after its first line (its first
+    body line) is executed. ``covered`` is reported for all branches and for
+    easy, medium and hard ones.
+
+    The ``_reference`` keys reproduce eval_branchcov.py exactly. It tests
+    ``res != False``, so a test that raises an exception other than
+    AssertionError still counts as executable, and its partial coverage can
+    still cover the branch; only a timeout does not. The plain keys use the
+    paper's definition, as eval_linecov.py does: such a test is not executable.
+    """
+
+    async def score(state: TaskState, target: Target) -> Score:
+        start: int = state.metadata["branch_start"]
+        end: int = state.metadata["branch_end"]
+        result = await _run_target_job(state, check_line=start + 1, measure_errors=True)
+        executed = result["called"] and result["outcome"] in EXECUTED_OUTCOMES
+        executed_reference = result["called"] and result["outcome"] in (
+            *EXECUTED_OUTCOMES,
+            "error",
+        )
+        hit = result["line_hit"] is True
+        covered = executed and hit
+        return Score(
+            value={
+                "syntax_correct": float(result["syntax_ok"]),
+                "exec_correct": float(executed),
+                "covered": float(covered),
+                "exec_correct_reference": float(executed_reference),
+                "covered_reference": float(executed_reference and hit),
+            },
+            explanation=_target_explanation(result, f"branch {start}-{end}", covered),
+            metadata=_target_metadata(result),
         )
 
     return score

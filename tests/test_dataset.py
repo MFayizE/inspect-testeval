@@ -9,9 +9,13 @@ from inspect_testeval.dataset import (
     DATASET_COMMIT,
     DEFAULT_SHUFFLE_SEED,
     METADATA_FIELDS,
+    load_target_dataset,
     load_testeval_dataset,
+    record_to_branch_samples,
+    record_to_line_samples,
     record_to_sample,
 )
+from inspect_testeval.prompts import branch_prompt, line_prompt
 
 
 def make_record(**overrides: Any) -> dict[str, Any]:
@@ -126,3 +130,84 @@ def test_combined_file_matches_files_used_by_original_scripts() -> None:
         assert row["python_solution_instrumented"] == i["python_solution_instrumented"]
         assert row["sampled_paths"] == t["sampled_paths"]
         assert row["sampled_condition_paths"] == t["sampled_condition_paths"]
+
+
+def test_line_samples_one_per_target_with_prompt_input() -> None:
+    record = make_record(target_lines=[2, 3])
+    samples = record_to_line_samples(record)
+    assert [s.id for s in samples] == ["1_line_2", "1_line_3"]
+    assert samples[1].input == line_prompt(
+        record["python_solution"], record["description"], "twoSum", 3
+    )
+    metadata = samples[1].metadata
+    assert metadata is not None
+    assert metadata["target_line"] == 3
+    assert metadata["func_name"] == "twoSum"
+    assert metadata["difficulty_label"] == "easy"
+    # Fields only the path task needs stay out of every targeted sample.
+    assert "sampled_paths" not in metadata
+    assert "blocks" not in metadata
+
+
+def test_branch_samples_one_per_block_with_difficulty() -> None:
+    blocks = [
+        {"type": "if", "start": 2, "end": 3, "difficulty": 0, "eg_cov_prob": 1.0},
+        {"type": "else", "start": 1, "end": 3, "difficulty": 2, "eg_cov_prob": 0.1},
+    ]
+    record = make_record(blocks=blocks)
+    samples = record_to_branch_samples(record)
+    assert [s.id for s in samples] == ["1_branch_2_3", "1_branch_1_3"]
+    assert samples[0].input == branch_prompt(
+        record["python_solution"], record["description"], "twoSum", 2, 3
+    )
+    metadata = samples[1].metadata
+    assert metadata is not None
+    assert metadata["branch_start"] == 1
+    assert metadata["branch_end"] == 3
+    assert metadata["branch_type"] == "else"
+    assert metadata["branch_difficulty"] == 2
+    assert metadata["branch_difficulty_label"] == "hard"
+
+
+@pytest.mark.parametrize("lineno", [0, 5])
+def test_line_samples_reject_targets_outside_the_program(lineno: int) -> None:
+    with pytest.raises(ValueError, match=f"targets line {lineno}"):
+        record_to_line_samples(make_record(target_lines=[lineno]))
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"type": "if", "start": 3, "end": 3, "difficulty": 0},
+        {"type": "if", "start": 2, "end": 9, "difficulty": 0},
+        {"type": "if", "start": 2, "end": 3, "difficulty": 3},
+    ],
+)
+def test_branch_samples_reject_invalid_blocks(block: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="branch"):
+        record_to_branch_samples(make_record(blocks=[block]))
+
+
+def test_target_dataset_rejects_unknown_target() -> None:
+    with pytest.raises(ValueError, match="target must be"):
+        load_target_dataset("path")  # type: ignore[arg-type]  # invalid on purpose
+
+
+@pytest.mark.dataset_download
+def test_target_datasets_match_published_counts() -> None:
+    lines = list(load_target_dataset("line"))
+    branches = list(load_target_dataset("branch"))
+    assert len(lines) == len({s.id for s in lines}) == 1340
+    assert len(branches) == len({s.id for s in branches}) == 983
+    labels = Counter(s.metadata["branch_difficulty_label"] for s in branches if s.metadata)
+    assert labels == {"easy": 498, "medium": 225, "hard": 260}
+
+
+@pytest.mark.dataset_download
+def test_target_datasets_shuffle_targets_across_programs() -> None:
+    upstream = [str(s.id) for s in load_target_dataset("line", shuffle=False)]
+    shuffled = [str(s.id) for s in load_target_dataset("line")]
+    assert upstream[:3] == ["4_line_16", "4_line_29", "4_line_30"]
+    assert shuffled == [str(s.id) for s in load_target_dataset("line")]
+    assert shuffled != upstream
+    assert sorted(shuffled) == sorted(upstream)

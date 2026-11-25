@@ -9,6 +9,10 @@ version: "1-A"
 tasks:
   - name: testeval_overall
     dataset_samples: 210
+  - name: testeval_line
+    dataset_samples: 1340
+  - name: testeval_branch
+    dataset_samples: 983
 metadata:
   sandbox:
     - scorer

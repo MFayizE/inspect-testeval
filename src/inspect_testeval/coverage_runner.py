@@ -14,7 +14,11 @@ from https://github.com/LLM4SoftwareTesting/TestEval (MIT licence, commit
   reference code, which averages the cumulative coverage after 1..k tests of
   each group. The two agree for k = 1.
 
-Usage: ``python coverage_runner.py <job.json>``; prints one JSON object.
+``evaluate_target`` scores one test written to cover a target line or branch,
+following ``eval_linecov.py`` and ``eval_branchcov.py`` from the same commit.
+
+Usage: ``python coverage_runner.py <job.json>``; prints one JSON object. A job
+with ``check_line`` is a targeted job, any other an overall one.
 """
 
 import json
@@ -108,11 +112,12 @@ def pytest_timeout(num_files: int) -> int:
     return PYTEST_BASE_TIMEOUT_SECONDS + 3 * EXEC_TIMEOUT_SECONDS * num_files
 
 
-def measure(workdir: Path, test_files: list[str]) -> dict[str, float] | None:
+def coverage_report(workdir: Path, test_files: list[str]) -> dict[str, Any] | None:
     """Run pytest with branch coverage over ``test_files``; ``None`` if no report is produced.
 
     Like upstream, the coverage report is read even when tests fail: a failing
-    assertion still executes the program under test.
+    assertion still executes the program under test. Any earlier report is
+    deleted first, so a run that writes none can't be read as an older one.
     """
     report_path = workdir / COVERAGE_JSON
     report_path.unlink(missing_ok=True)
@@ -131,7 +136,15 @@ def measure(workdir: Path, test_files: list[str]) -> dict[str, float] | None:
         return None
     if not report_path.exists():
         return None
-    totals = json.loads(report_path.read_text(encoding="utf-8"))["totals"]
+    return json.loads(report_path.read_text(encoding="utf-8"))
+
+
+def measure(workdir: Path, test_files: list[str]) -> dict[str, float] | None:
+    """Line and branch coverage of ``test_files``; ``None`` if it can't be measured."""
+    report = coverage_report(workdir, test_files)
+    if report is None:
+        return None
+    totals = report["totals"]
     if totals["num_statements"] == 0 or totals["num_branches"] == 0:
         return None
     return {
@@ -271,10 +284,67 @@ def evaluate(
     }
 
 
+def evaluate_target(job: dict[str, Any], workdir: Path) -> dict[str, Any]:
+    """Run one test written to cover a target and report whether it reaches ``check_line``.
+
+    Follows eval_linecov.py and eval_branchcov.py: a test that compiles, runs
+    (a failing assertion counts) and calls the function under test is run under
+    coverage on its own, and the target counts as covered if ``check_line`` is
+    among the executed lines. ``check_line`` is the target line, or the line
+    after a branch's first line.
+
+    With ``measure_errors``, a test that raised another exception is measured
+    too, because eval_branchcov.py counts it as executable (it tests
+    ``res != False``); the scorer decides which outcomes count.
+    """
+    func_name: str = job["func_name"]
+    testcase: str = job["test"]
+    workdir.mkdir(parents=True, exist_ok=True)
+    (workdir / "under_test.py").write_text(job["code"], encoding="utf-8")
+    (workdir / ".coveragerc").write_text(job["coveragerc"], encoding="utf-8")
+
+    result: dict[str, Any] = {
+        "syntax_ok": False,
+        "outcome": "syntax_error",
+        "called": False,
+        "line_hit": None,
+        "coverage_failure": False,
+    }
+    try:
+        compile(testcase, "<string>", "exec")
+    except Exception:  # upstream counts any compile failure as a syntax error
+        return result
+    result["syntax_ok"] = True
+
+    test_code = "from under_test import Solution\n" + testcase + f"\ntest_{func_name}()"
+    outcome = run_test(workdir, 0, test_code)
+    result["outcome"] = outcome["status"]
+    if "error" in outcome:
+        result["error"] = outcome["error"]
+    result["called"] = test_code.find(f"solution.{func_name}") != -1
+
+    measured = (
+        ("ok", "assertion_error", "error") if job["measure_errors"] else ("ok", "assertion_error")
+    )
+    if not result["called"] or result["outcome"] not in measured:
+        return result
+    (workdir / "test_target.py").write_text(
+        "from under_test import Solution\n" + testcase, encoding="utf-8"
+    )
+    report = coverage_report(workdir, ["test_target.py"])
+    file_report = (report or {}).get("files", {}).get("under_test.py")
+    if file_report is None:
+        result["coverage_failure"] = True
+        return result
+    result["line_hit"] = job["check_line"] in file_report["executed_lines"]
+    return result
+
+
 def main(argv: list[str]) -> int:
     job_path = Path(argv[1])
     job = json.loads(job_path.read_text(encoding="utf-8"))
-    result = evaluate(job, job_path.parent / "work")
+    workdir = job_path.parent / "work"
+    result = evaluate_target(job, workdir) if "check_line" in job else evaluate(job, workdir)
     sys.stdout.write(json.dumps(result))
     return 0
 

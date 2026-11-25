@@ -24,11 +24,19 @@ def download(url: str, path: Path) -> None:
 
 
 def main() -> None:
-    for name in ("eval_overall.py", "data_utils.py", ".coveragerc"):
+    for name in (
+        "eval_overall.py",
+        "eval_linecov.py",
+        "eval_branchcov.py",
+        "data_utils.py",
+        ".coveragerc",
+        "data/leetcode-py.jsonl",
+    ):
         download(f"{UPSTREAM}/{name}", WORK / "official" / name)
     for model in MODELS:
-        name = f"totalcov_{model}_format.jsonl"
-        download(f"{FORK}/predictions/{name}", WORK / "predictions" / name)
+        for task in ("totalcov", "linecov", "branchcov"):
+            name = f"{task}_{model}_format.jsonl"
+            download(f"{FORK}/predictions/{name}", WORK / "predictions" / name)
 
 
 if __name__ == "__main__":

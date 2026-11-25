@@ -1,10 +1,11 @@
+import json
 import random
 from pathlib import Path
 
 import pytest
 
 from inspect_testeval import coverage_runner
-from inspect_testeval.coverage_runner import cov_at_k, evaluate, split_groups
+from inspect_testeval.coverage_runner import cov_at_k, evaluate, evaluate_target, split_groups
 from inspect_testeval.scorers import COVERAGERC
 
 # 7 statements (class, def, if, return, if, return, return) and 4 branches.
@@ -173,3 +174,96 @@ def test_split_groups_drops_remainder_and_keeps_short_lists(
 ) -> None:
     tests = [f"t{i}" for i in range(count)]
     assert [len(g) for g in split_groups(tests, k)] == sizes
+
+
+def _target_job(test: str, check_line: int, measure_errors: bool = False) -> dict[str, object]:
+    return {
+        "code": PROGRAM,
+        "func_name": "classify",
+        "test": test,
+        "check_line": check_line,
+        "measure_errors": measure_errors,
+        "coveragerc": COVERAGERC,
+    }
+
+
+@pytest.mark.parametrize(
+    ("test", "check_line", "hit"),
+    [
+        (POSITIVE, 4, True),  # return "pos"
+        (POSITIVE, 6, False),  # return "neg" never runs for 3
+        (NEGATIVE, 6, True),
+        (WRONG_ASSERT, 6, True),  # the assertion fails after the line ran
+    ],
+)
+def test_target_reports_whether_the_line_ran(
+    tmp_path: Path, test: str, check_line: int, hit: bool
+) -> None:
+    result = evaluate_target(_target_job(test, check_line), tmp_path / "work")
+    assert result["syntax_ok"] is True
+    assert result["called"] is True
+    assert result["line_hit"] is hit
+    assert result["coverage_failure"] is False
+
+
+@pytest.mark.parametrize(
+    ("test", "outcome", "called"),
+    [(SYNTAX_ERROR, "syntax_error", False), (NOT_CALLED, "ok", False)],
+)
+def test_target_not_measured_without_a_compiling_call(
+    tmp_path: Path, test: str, outcome: str, called: bool
+) -> None:
+    result = evaluate_target(_target_job(test, 4), tmp_path / "work")
+    assert result["outcome"] == outcome
+    assert result["called"] is called
+    assert result["line_hit"] is None
+
+
+# Reaches `return "neg"` (line 6), then raises.
+RAISES_AFTER_CALL = (
+    "def test_classify():\n    solution = Solution()\n"
+    "    solution.classify(-1)\n    raise ValueError('boom')"
+)
+
+
+def test_target_error_measured_only_when_asked(tmp_path: Path) -> None:
+    plain = evaluate_target(_target_job(RAISES_AFTER_CALL, 6), tmp_path / "a")
+    assert plain["outcome"] == "error"
+    assert plain["error"] == "ValueError"
+    assert plain["line_hit"] is None
+    # eval_branchcov.py counts such a test as executable and measures it.
+    measured = evaluate_target(
+        _target_job(RAISES_AFTER_CALL, 6, measure_errors=True), tmp_path / "b"
+    )
+    assert measured["line_hit"] is True
+
+
+def test_target_timeout_is_never_measured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(coverage_runner, "EXEC_TIMEOUT_SECONDS", 1)
+    result = evaluate_target(_target_job(HANGS, 4, measure_errors=True), tmp_path / "work")
+    assert result["outcome"] == "timeout"
+    assert result["line_hit"] is None
+
+
+def test_target_coverage_run_without_report_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(coverage_runner, "pytest_timeout", lambda num_files: 0.001)
+    result = evaluate_target(_target_job(POSITIVE, 4), tmp_path / "work")
+    assert result["outcome"] == "ok"
+    assert result["coverage_failure"] is True
+    assert result["line_hit"] is None
+
+
+def test_main_dispatches_on_job_kind(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    targeted = tmp_path / "targeted" / "job.json"
+    targeted.parent.mkdir()
+    targeted.write_text(json.dumps(_target_job(POSITIVE, 4)), encoding="utf-8")
+    assert coverage_runner.main(["runner", str(targeted)]) == 0
+    assert json.loads(capsys.readouterr().out)["line_hit"] is True
+
+    overall = tmp_path / "overall" / "job.json"
+    overall.parent.mkdir()
+    overall.write_text(json.dumps(_job([POSITIVE])), encoding="utf-8")
+    assert coverage_runner.main(["runner", str(overall)]) == 0
+    assert json.loads(capsys.readouterr().out)["exec_correct"] == 1

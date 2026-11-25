@@ -1,21 +1,27 @@
-# Parity check against the reference scorer
+# Parity check against the reference scorers
 
 `parity.py` scores the same model-generated tests with this eval's coverage
 runner and with the unmodified reference `eval_overall.py`, in the same Linux
-image, and compares every metric.
+image, and compares every metric. `parity_target.py` does the same for the
+targeted tasks against the unmodified `eval_linecov.py` and `eval_branchcov.py`,
+program by program.
 
 ## Inputs
 
 `fetch.py` downloads into `work/` (ignored by git):
 
-- `eval_overall.py`, `data_utils.py` and `.coveragerc` from
+- `eval_overall.py`, `eval_linecov.py`, `eval_branchcov.py`, `data_utils.py`,
+  `.coveragerc` and `data/leetcode-py.jsonl` from
   [LLM4SoftwareTesting/TestEval](https://github.com/LLM4SoftwareTesting/TestEval)
   at commit `6f67dee71de6ccda1767b8c219a93f4ae0a7ce90`, the commit the eval pins.
-- `totalcov_<model>_format.jsonl` for gpt-4o and Meta-Llama-3-8B-Instruct from
+- `totalcov_`, `linecov_` and `branchcov_<model>_format.jsonl` for gpt-4o and
+  Meta-Llama-3-8B-Instruct from
   [HyunjoonCho/TestEval](https://github.com/HyunjoonCho/TestEval) (MIT) at commit
   `0f64e7aa9bda39258d7ce7126c0b9d4860e18099`: real model replies after the
-  reference formatter, 210 programs x 10 tests each. That fork changes only an
-  output filename in `format.py` and adds per-task logging to `eval_overall.py`.
+  reference formatter (210 programs x 10 tests; 1,340 target lines; 983 target
+  branches). That fork changes only an output filename in `format.py`, adds
+  per-task logging to the evaluators and records token costs in the generator;
+  the prompts and scoring logic are upstream's.
 
 ## Modes
 
@@ -36,12 +42,27 @@ run is killed (exit 137) unless the machine has enough memory. This eval runs
 each test in a separate process: under the sandbox's 1 GB limit that test is
 recorded as a timeout and the other nine are scored normally.
 
+## Targeted tasks
+
+The reference `eval_linecov.py` and `eval_branchcov.py` print only totals, so
+`run_official_target.py` calls `eval_correctness` once per program and reads
+the counts line and the `covered line N` / `covered branch S-E` lines it
+prints. For every program the number of syntax-correct and executable tests
+and the set of covered targets must equal the port's. Branches are compared
+with the port's `_reference` definition, which, like `eval_branchcov.py`
+(`res != False`), counts a test that raised an exception as executable; the
+paper definition is printed alongside. Between calls the script resets only
+what the reference code leaves behind (see its docstring); the scoring code is
+not changed.
+
 ## Run
 
 From the repository root, with Docker running:
 
 ```bash
 uv run python tools/parity/parity.py --modes identity
+uv run python tools/parity/parity_target.py
 ```
 
-The report is written to `work/parity_report.json`.
+The reports are written to `work/parity_report.json` and
+`work/parity_target_report.json`.
