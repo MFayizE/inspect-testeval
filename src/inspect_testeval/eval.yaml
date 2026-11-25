@@ -7,8 +7,8 @@ contributors:
   - MFayizE
 version: "1-A"
 tasks:
-  - name: inspect_testeval
-    dataset_samples: 2
+  - name: testeval_overall
+    dataset_samples: 210
 metadata:
   sandbox:
     - scorer

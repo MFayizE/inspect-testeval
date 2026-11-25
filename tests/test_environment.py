@@ -65,6 +65,9 @@ def test_compose_runs_without_network_and_as_built_image() -> None:
     compose = SANDBOX_COMPOSE_FILE.read_text(encoding="utf-8")
     assert "network_mode: none" in compose
     assert "build:" in compose
+    assert re.search(r"cap_drop:\s*\n\s*- ALL", compose)
+    assert "no-new-privileges:true" in compose
+    assert re.search(r"pids_limit: \d+", compose)
     dockerfile = (SANDBOX_DIR / "Dockerfile").read_text(encoding="utf-8")
     assert re.search(r"^FROM \S+@sha256:[0-9a-f]{64}$", dockerfile, flags=re.MULTILINE)
     assert "--require-hashes" in dockerfile
@@ -97,6 +100,15 @@ def _probe_sandbox() -> Solver:
             ]
         )
         assert not network.success, "sandbox must have no network access"
+
+        status = await env.exec(["cat", "/proc/self/status"])
+        assert status.success, status.stderr
+        capabilities = dict(
+            line.split(":\t", 1) for line in status.stdout.splitlines() if line.startswith("Cap")
+        )
+        assert capabilities["CapEff"].strip() == "0000000000000000", capabilities
+        assert capabilities["CapBnd"].strip() == "0000000000000000", capabilities
+        assert "NoNewPrivs:\t1" in status.stdout
 
         await env.write_file("under_test.py", PROGRAM)
         await env.write_file("test_sign.py", TEST)

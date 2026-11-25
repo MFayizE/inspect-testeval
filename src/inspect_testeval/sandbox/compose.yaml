@@ -3,8 +3,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # Model-generated tests never need the network.
+    # Model-generated tests never need the network, extra privileges or many processes.
     network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
     mem_limit: 1g
     cpus: 1
     init: true

@@ -37,6 +37,11 @@ dev = [
     "pytest-inspect-evals[huggingface]==0.4.0",
     "pytest-mock",
     "ruff==0.17.4",
+    # Same pins as src/inspect_testeval/sandbox/requirements.in, so the coverage
+    # runner's unit tests run locally exactly as in the sandbox.
+    "coverage==7.17.3",
+    "pytest-cov==7.1.0",
+    "sortedcontainers==2.4.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -58,9 +63,22 @@ include = ["inspect_testeval*"] # examples/ stays out of the wheel
 [tool.inspect-evals-lint]
 preset = "single-eval"
 
+# IESC002 flags compile() calls. Neither runs model code on the host:
+# - coverage_runner.py is copied into the Docker sandbox and only runs there.
+# - formatting.py compiles a model's reply only to test whether its last line is
+#   complete (compile() parses, it never executes). It must stay compile(), not
+#   ast.parse(): compile() also rejects e.g. a stray `return` at module level,
+#   which decides which lines the reference formatter drops.
+[tool.inspect-evals-lint.per-file-ignores]
+"src/inspect_testeval/coverage_runner.py" = ["IESC002"]
+"src/inspect_testeval/formatting.py" = ["IESC002"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# Tests start with "test_"; the default "test*" would also collect the
+# testeval_* task functions that test modules import.
+python_functions = ["test_*"]
 addopts = "-rA --durations=10 --color=yes"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -122,3 +140,6 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "**/{tests,examples}/**" = ["D", "PLR2004"] # tests and examples skip docstring linting
+# PT028 reads any function named test* as a pytest test; the testeval_* task
+# functions in src are Inspect tasks whose parameters need defaults.
+"src/**" = ["PT028"]

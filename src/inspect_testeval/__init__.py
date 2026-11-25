@@ -1,3 +1,3 @@
-from inspect_testeval.inspect_testeval import inspect_testeval
+from inspect_testeval.inspect_testeval import testeval_overall
 
-__all__ = ["inspect_testeval"]
+__all__ = ["testeval_overall"]
