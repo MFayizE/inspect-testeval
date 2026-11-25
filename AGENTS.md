@@ -16,7 +16,7 @@ This project uses `uv`. Do not use `pip`, bare `python` or bare `pytest`.
 
 - `src/inspect_testeval/inspect_testeval.py`: the task, `record_to_sample`, and the version read from `eval.yaml`.
 - `src/inspect_testeval/eval.yaml`: title, description, contributors, version and tasks. Edit it and run `make readmes`.
-- `README.md`: the eval's documentation, including the generated sections.
+- `src/inspect_testeval/README.md`: the eval's documentation, including the generated sections. The repository `README.md` is a short overview that links to it.
 - `tests/test_inspect_testeval.py`: the tests.
 - `agent_artefacts/trajectory_analysis/inspect_scout/`: Scout scanners for the transcript audit.
 

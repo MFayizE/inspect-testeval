@@ -1,0 +1,29 @@
+{
+  "source": "Wang et al., TestEval: Benchmarking Large Language Models for Test Case Generation, NAACL 2025 Findings, https://arxiv.org/abs/2406.04531 (HTML version), Tables 1-4. Values are percentages. Assertion correctness and the no-target baselines are left out: this eval does not compute them.",
+  "models": {
+    "GPT-3.5-turbo": {
+      "overall": {"syntax": 100, "execution": 97.43, "line": 96.27, "branch": 93.65, "line_cov@1": 88.35, "line_cov@2": 90.02, "line_cov@5": 92.14, "branch_cov@1": 81.87, "branch_cov@2": 84.32, "branch_cov@5": 87.55},
+      "line": {"syntax": 99.40, "execution": 95.67, "coverage": 67.76},
+      "branch": {"syntax": 100, "execution": 98.78, "total": 70.40, "easy": 82.93, "medium": 65.33, "hard": 50.77},
+      "path": {"syntax": 99.88, "execution": 98.95, "path_cov": 49.30, "path_similarity": 77.35}
+    },
+    "GPT-4o": {
+      "overall": {"syntax": 99.59, "execution": 98.30, "line": 98.65, "branch": 97.16, "line_cov@1": 90.23, "line_cov@2": 92.16, "line_cov@5": 94.33, "branch_cov@1": 84.05, "branch_cov@2": 86.89, "branch_cov@5": 90.31},
+      "line": {"syntax": 99.63, "execution": 98.96, "coverage": 80.97},
+      "branch": {"syntax": 100, "execution": 99.08, "total": 80.87, "easy": 87.55, "medium": 83.11, "hard": 66.15},
+      "path": {"syntax": 100, "execution": 99.53, "path_cov": 56.67, "path_similarity": 82.35}
+    },
+    "GPT-4o-mini": {
+      "overall": {"syntax": 100, "execution": 99.92, "line": 98.76, "branch": 97.58, "line_cov@1": 88.06, "line_cov@2": 90.33, "line_cov@5": 93.51, "branch_cov@1": 81.64, "branch_cov@2": 85.03, "branch_cov@5": 89.60},
+      "line": {"syntax": 100, "execution": 99.92, "coverage": 76.94},
+      "branch": {"syntax": 100, "execution": 99.39, "total": 78.13, "easy": 87.35, "medium": 77.33, "hard": 61.15},
+      "path": {"syntax": 100, "execution": 99.77, "path_cov": 51.87, "path_similarity": 80.09}
+    },
+    "Llama3-8b": {
+      "overall": {"syntax": 99.25, "execution": 82.24, "line": 90.98, "branch": 89.02, "line_cov@1": 77.40, "line_cov@2": 80.08, "line_cov@5": 84.42, "branch_cov@1": 69.47, "branch_cov@2": 73.37, "branch_cov@5": 79.22},
+      "line": {"syntax": 98.96, "execution": 85.52, "coverage": 60.22},
+      "branch": {"syntax": 98.88, "execution": 84.94, "total": 58.39, "easy": 73.09, "medium": 59.11, "hard": 29.26},
+      "path": {"syntax": 98.24, "execution": 89.46, "path_cov": 41.92, "path_similarity": 68.03}
+    }
+  }
+}

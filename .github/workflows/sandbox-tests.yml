@@ -1,0 +1,33 @@
+name: Sandbox tests
+
+# The Docker tests are also marked slow, so the shared CI's plain `pytest`
+# skips them. This job builds the sandbox image and runs them: the probe of
+# the sandbox's isolation and one end-to-end run of each task with a mock
+# model.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    name: Docker sandbox tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Run the Docker tests
+        run: uv run pytest -m docker --runslow

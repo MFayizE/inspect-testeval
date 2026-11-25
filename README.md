@@ -1,106 +1,20 @@
 # inspect-testeval
 
-TestEval (NAACL 2025): benchmarking LLMs on test case generation with overall, targeted line, branch and path coverage
+An [Inspect AI](https://inspect.aisi.org.uk/) port of [TestEval](https://arxiv.org/abs/2406.04531) (NAACL 2025 Findings), a benchmark for unit test generation: models write pytest tests for 210 LeetCode Python programs, scored by overall line and branch coverage and by covering a given target line, branch or execution path. Tests run in a Docker sandbox, and every task reproduces the authors' reference scorer exactly on real model outputs.
 
-<!-- Contributors: Automatically Generated -->
-Contributed by [@MFayizE](https://github.com/MFayizE)
-<!-- /Contributors: Automatically Generated -->
+**Documentation:** [src/inspect_testeval/README.md](src/inspect_testeval/README.md) covers the tasks, dataset, scoring, deviations from the reference implementation and the parity check.
 
-<!-- Usage: Automatically Generated -->
-## Usage
+## Quick start
 
-First, install dependencies:
+Docker must be running: generated tests run in a sandbox container.
 
 ```bash
 uv sync
-```
-
-Then run evaluations:
-
-```bash
-uv run inspect eval inspect_testeval/inspect_testeval --model openai/gpt-5-nano
-```
-
-You can also import tasks as Python objects:
-
-```python
-from inspect_ai import eval
-from inspect_testeval import inspect_testeval
-eval(inspect_testeval)
-```
-
-If your directory name doesn't match your package name but you have registered your eval task, you can also run:
-
-```bash
-uv run inspect eval inspect_testeval --model openai/gpt-5-nano
-```
-
-After running evaluations, view logs with:
-
-```bash
+uv run inspect eval inspect_testeval/testeval_line --model openai/gpt-4o-mini --limit 20
 uv run inspect view
 ```
 
-If you don't want to specify `--model` each time, create a `.env` file:
-
-```bash
-INSPECT_EVAL_MODEL=anthropic/claude-opus-4-1-20250805
-ANTHROPIC_API_KEY=<anthropic-api-key>
-```
-<!-- /Usage: Automatically Generated -->
-
-<!-- Options: Automatically Generated -->
-## Options
-
-You can control a variety of options from the command line. For example:
-
-```bash
-uv run inspect eval inspect_testeval/inspect_testeval --limit 10
-uv run inspect eval inspect_testeval/inspect_testeval --max-connections 10
-uv run inspect eval inspect_testeval/inspect_testeval --temperature 0.5
-```
-
-See `uv run inspect eval --help` for all available options.
-<!-- /Options: Automatically Generated -->
-
-<!-- Parameters: Automatically Generated -->
-## Parameters
-
-### `inspect_testeval`
-
-No task parameters.
-<!-- /Parameters: Automatically Generated -->
-
-## Dataset
-
-Describe the dataset here: where it comes from, how many samples it has, and how a record becomes a `Sample`.
-
-## Scoring
-
-Describe the scorer here: what counts as correct, and which metrics the task reports.
-
-## Deviations from the original implementation
-
-| What changed | Why | Expected effect on scores |
-| --- | --- | --- |
-| Nothing yet. | | |
-
-## Architecture
-
-Add a diagram of the task here: dataset, solver, scorer, and any sandbox or judge model.
-
-## Getting started
-
-```bash
-uv sync
-uv run pre-commit install
-uv run inspect eval inspect_testeval/inspect_testeval --model anthropic/claude-sonnet-5-5
-uv run inspect view
-```
-
-Put `INSPECT_EVAL_MODEL` and your API keys in a `.env` file (it is git-ignored) to avoid passing `--model` each time.
-
-The dev dependencies include the `anthropic` and `openai` SDKs. Inspect needs one package per model provider, so add the package for any other provider with `uv add --dev <package>`; Inspect's error message names the package when it is missing.
+The four tasks are `testeval_overall`, `testeval_line`, `testeval_branch` and `testeval_path`. Put `INSPECT_EVAL_MODEL` and your API keys in a `.env` file (it is git-ignored) to avoid passing `--model` each time. The dev dependencies include the `anthropic` and `openai` SDKs; add the package for any other provider with `uv add --dev <package>`.
 
 ## Checks and tests
 
@@ -109,13 +23,17 @@ make check   # ruff, basedpyright, inspect-evals-lint, generated README sections
 make test    # pytest
 ```
 
-Slow tests run with `uv run pytest --runslow`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the other gates and markers.
+Tests that need Docker, download the dataset or run long are marked `docker`, `dataset_download` and `slow`; slow tests run with `uv run pytest --runslow`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the other gates.
+
+The parity check against the reference scripts (needs Docker) is described in [tools/parity/README.md](tools/parity/README.md).
 
 ## Layout
 
 ```text
-src/inspect_testeval/        the eval: task module, eval.yaml
-tests/test_inspect_testeval.py   its tests
+src/inspect_testeval/            the eval: tasks, dataset, solvers, scorers, eval.yaml, README.md
+src/inspect_testeval/sandbox/    Docker image the generated tests run in
+tests/                           tests (pytest)
+tools/parity/                    comparison with the unmodified reference scorers
 agent_artefacts/trajectory_analysis/inspect_scout/   Scout scanners for the transcript audit
 ```
 
@@ -127,7 +45,10 @@ The `inspect-evals` skills (create-eval, investigate-dataset, ensure-test-covera
 - Codex: `codex plugin marketplace add Generality-Labs/agent-skills` then `codex plugin add inspect-evals@generality`, once per machine.
 - Other agents: `npx skills add Generality-Labs/agent-skills --agent <agent>`.
 
+## Licence and attribution
+
+MIT. The dataset, prompts and scoring logic come from [LLM4SoftwareTesting/TestEval](https://github.com/LLM4SoftwareTesting/TestEval) (MIT). The test fixtures and parity inputs use model outputs published in [HyunjoonCho/TestEval](https://github.com/HyunjoonCho/TestEval) (MIT).
+
 ## Keeping up with the template
 
-A weekly workflow runs `copier update` and opens a pull request when the template changed.
-`README.md`, `src/inspect_testeval/` and `tests/inspect_testeval/` are never overwritten by an update.
+This repository was created from [inspect-evals-template](https://github.com/Generality-Labs/inspect-evals-template). A weekly workflow runs `copier update` and opens a pull request when the template changed. `README.md`, `src/inspect_testeval/` and `tests/test_inspect_testeval.py` are never overwritten by an update; the other test files are not part of the template.
